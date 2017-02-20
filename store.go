@@ -67,10 +67,10 @@ func Store(data []byte, packetId byte, btcFee float64, options *rpc.RpcOptions) 
 
 	// split data & create our packets
 	payload := make([]Packet, 0)
-	totalPayload := int16(math.Ceil(float64(len(data)) / float64(OP_RETURN_MAX_BYTES-14))) // TODO: Error/Warn if reach limits
+	totalPayload := int16(math.Ceil(float64(len(data)) / float64(OP_RETURN_MAX_BYTES-PACKET_HEADER_SIZE))) // TODO: Error/Warn if reach limits
 	fmt.Printf("total payloads: %d\n", totalPayload)
 	for i := int16(0); i < totalPayload; i++ {
-		length := OP_RETURN_MAX_BYTES - 14
+		length := OP_RETURN_MAX_BYTES - PACKET_HEADER_SIZE
 		if len(data) < length {
 			length = len(data)
 		}

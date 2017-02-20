@@ -7,6 +7,8 @@ import (
 	"hash/crc64"
 )
 
+const PACKET_HEADER_SIZE int = 20
+
 type OutputAddr [20]byte
 
 func (outputAddr OutputAddr) String() string {
