@@ -550,7 +550,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	blockScanRequestChan := make(chan BlockScanRequest, len(blockPos))
 	blockScanResultChan := make(chan BlockScanResult, len(blockPos))
 
-	numWorkers := runtime.GOMAXPROCS(-1) * 25 // e.g. 16 PROCS * 25 = 400 workers
+	numWorkers := runtime.GOMAXPROCS(-1) * 50 // e.g. 16 PROCS * 50 = 400 workers
 	doneChan := make(chan bool, numWorkers)
 
 	log.Println("Parsing...")
