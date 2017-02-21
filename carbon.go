@@ -1129,14 +1129,16 @@ func (cc *CarbonChain) processPacketQueue() error {
 		outputAddrStr := keys[m]
 		outputAddr, _ := hex.DecodeString(outputAddrStr)
 		packets := packetQueue[outputAddrStr]
+		usedPackets := make([]int, 0)
 
 		// find the first packet first; packets[0] not always guaranteed to be the first
 		var firstPacket *Packet
 		for i := 0; i < len(packets); i++ {
 			if packets[i].Sequence == 0 {
 				firstPacket = &packets[i]
-				packets[i] = packets[len(packets)-1]
-				packets = packets[:len(packets)-1]
+
+				// marked the packet as used
+				usedPackets = append(usedPackets, i)
 				break
 			}
 		}
@@ -1171,9 +1173,8 @@ func (cc *CarbonChain) processPacketQueue() error {
 					continue
 				}
 
-				// delete used packet
-				packets[i] = packets[len(packets)-1]
-				packets = packets[:len(packets)-1]
+				// marked the packet as used
+				usedPackets = append(usedPackets, i)
 
 				found = true
 			}
@@ -1213,13 +1214,13 @@ func (cc *CarbonChain) processPacketQueue() error {
 		// check if the last packet has the termination signal
 		if missingPackets {
 			log.Printf("\tWARNING: Missing packets for outputAddr %x. Last packet: %+v!\n", outputAddr, lastPacket)
-
-			// Delete the entry if no packets exist for this outputAddr anymore
-			if len(packets) == 0 {
-				delete(packetQueue, outputAddrStr)
-			}
-
 			continue
+		}
+
+		// delete used packets
+		for _, i := range usedPackets {
+			packets[i] = packets[len(packets)-1]
+			packets = packets[:len(packets)-1]
 		}
 
 		//log.Printf("Merged Packet Data: %s\n", data)
