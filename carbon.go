@@ -1129,7 +1129,15 @@ func (cc *CarbonChain) processPacketQueue() error {
 		outputAddrStr := keys[m]
 		outputAddr, _ := hex.DecodeString(outputAddrStr)
 		packets := packetQueue[outputAddrStr]
+
 		usedPackets := make([]int, 0)
+		data := make([]byte, 0)
+		txids := make([]blockchainparser.Hash256, 0)
+		var lastPacket Packet
+		var nextChecksum []byte
+		nextSequence := int16(0)
+		counter := 0
+		missingPackets := false
 
 		// find the first packet first; packets[0] not always guaranteed to be the first
 		var firstPacket *Packet
@@ -1142,42 +1150,42 @@ func (cc *CarbonChain) processPacketQueue() error {
 				break
 			}
 		}
-
 		if firstPacket == nil {
 			log.Printf("\tWARNING: Cannot find first packet outputAddr %x: %+v!\n", outputAddr, packets[0])
 			continue
 		}
 
-		data := make([]byte, 0)
-		txids := make([]blockchainparser.Hash256, 0)
-		var lastPacket Packet
-		var nextChecksum []byte
-		nextSequence := int16(0)
-		counter := 0
-		missingPackets := false
+		// we will use the last packet timestamp as the datapack timestamp; keep track of it
 		lastTimestamp := firstPacket.Timestamp
 
 		// assemble packets
 		for true {
 			found := false
 			var p Packet
-			for i := 0; i < len(packets); i++ {
-				p = packets[i]
-
-				// find the next sequence
-				if p.Sequence != nextSequence {
-					continue
-				}
-
-				// verify checksum
-				if nextChecksum != nil && !bytes.Equal(p.Checksum[:], nextChecksum) {
-					continue
-				}
-
-				// marked the packet as used
-				usedPackets = append(usedPackets, i)
+			if firstPacket != nil {
+				p = *firstPacket
+				firstPacket = nil
 
 				found = true
+			} else {
+				for i := 0; i < len(packets); i++ {
+					p = packets[i]
+
+					// find the packet which is the next sequence
+					if nextSequence != p.Sequence {
+						continue
+					}
+
+					// verify checksum
+					if nextChecksum != nil && !bytes.Equal(p.Checksum[:], nextChecksum) {
+						continue
+					}
+
+					// mark the packet as used
+					usedPackets = append(usedPackets, i)
+
+					found = true
+				}
 			}
 
 			if found {
@@ -1242,9 +1250,14 @@ func (cc *CarbonChain) processPacketQueue() error {
 		})
 
 		// delete used packets
-		for _, i := range usedPackets {
-			packets[i] = packets[len(packets)-1]
-			packets = packets[:len(packets)-1]
+		for i := 0; i < len(usedPackets); i++ {
+			packets[i].Id = 0
+		}
+		for i := 0; i < len(packets); i++ {
+			if packets[i].Id == 0 {
+				packets = append(packets[:i], packets[i+1:]...)
+				i--
+			}
 		}
 
 		// delete if no more packets from this outputAddr
@@ -1262,7 +1275,10 @@ func (cc *CarbonChain) processPacketQueue() error {
 		}
 	}
 	if len(packetQueue) > 0 {
-		log.Printf("Unable to process: %+v\n", packetQueue)
+		log.Println("Unable to process:")
+		for outputAddr, packets := range packetQueue {
+			log.Printf("%x: %+v", outputAddr, packets)
+		}
 	}
 
 	// Save the unable to process packetQueues back to db
