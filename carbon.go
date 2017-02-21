@@ -941,7 +941,7 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 					}
 					packet.Txid = tx.Txid()
 					copy(packet.OutputAddr[:], outputAddr)
-					packet.Timestamp = block.Timestamp.Unix()
+					packet.Timestamp = time.Now().Unix()
 					log.Printf("Received packet in Txid: %v\n", packet.Txid)
 					log.Printf("\tData (%x, %d): %s\n", outputAddr, packet.Sequence, packet.Data)
 					//log.Printf("\tChecksum: %x vs %x\n", packet.Checksum[:], packet.CalculateChecksum())
@@ -1096,11 +1096,11 @@ func (cc *CarbonChain) processPacketQueue() error {
 				//	continue
 				//}
 
-				// ignore packets more than a week old
-				//if time.Unix(packet.Timestamp, 0).Before(time.Now().AddDate(0, 0, -2)) {
-				//	log.Printf("\tIgnoring %d: %+v (more than 2 days old!)\n", binary.BigEndian.Uint64(id2), packet)
-				//	continue
-				//}
+				// ignore packets added more than 3 days ago
+				if time.Unix(packet.Timestamp, 0).Before(time.Now().AddDate(0, 0, -3)) {
+					log.Printf("\tIgnoring %d: %+v (more than 3 days old!)\n", binary.BigEndian.Uint64(id2), packet)
+					continue
+				}
 
 				if packetQueue[hex.EncodeToString(outputAddr)] == nil {
 					packetQueue[hex.EncodeToString(outputAddr)] = make([]Packet, 0)
@@ -1155,6 +1155,7 @@ func (cc *CarbonChain) processPacketQueue() error {
 		nextSequence := int16(0)
 		counter := 0
 		missingPackets := false
+		lastTimestamp := firstPacket.Timestamp
 
 		// assemble packets
 		for true {
@@ -1187,10 +1188,9 @@ func (cc *CarbonChain) processPacketQueue() error {
 				data = append(data, p.Data...)
 				txids = append(txids, p.Txid)
 
+				lastTimestamp = p.Timestamp
+
 				lastPacket = p
-				if hex.EncodeToString(outputAddr) == "3034ef526d95140dc44b5fbebf2945c0884b5b26" {
-					log.Printf("%+v\n", p)
-				}
 			} else {
 				//log.Println("Not found")
 				missingPackets = true
@@ -1217,14 +1217,8 @@ func (cc *CarbonChain) processPacketQueue() error {
 			continue
 		}
 
-		// delete used packets
-		for _, i := range usedPackets {
-			packets[i] = packets[len(packets)-1]
-			packets = packets[:len(packets)-1]
-		}
-
 		//log.Printf("Merged Packet Data: %s\n", data)
-		datapack := Datapack{Txids: txids, Data: data, Timestamp: firstPacket.Timestamp}
+		datapack := Datapack{Txids: txids, Data: data, Timestamp: lastTimestamp}
 		copy(datapack.OutputAddr[:], outputAddr)
 		datapacks = append(datapacks, datapack)
 		err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
@@ -1246,6 +1240,12 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 			return nil
 		})
+
+		// delete used packets
+		for _, i := range usedPackets {
+			packets[i] = packets[len(packets)-1]
+			packets = packets[:len(packets)-1]
+		}
 
 		// delete if no more packets from this outputAddr
 		if len(packets) == 0 {

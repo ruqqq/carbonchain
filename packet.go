@@ -33,7 +33,7 @@ type Packet struct {
 	Length       int                      `struc:"little,sizeof=Data"`
 	Data         []byte                   `struc:"little"`
 	OutputAddr   OutputAddr               `struc:"little,[20]byte"`
-	Timestamp    int64                    `struc:"little"`
+	Timestamp    int64                    `struc:"little"` // time this packet is inserted into db
 }
 
 func NewPacketFromBytes(data []byte) *Packet {
