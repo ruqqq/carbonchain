@@ -493,6 +493,56 @@ func (cc *CarbonChain) GetBlockAtHeight(height int) (*blockchainparser.Block, er
 	return block, nil
 }
 
+func (cc *CarbonChain) GetTransaction(hash []byte) (*blockchainparser.Transaction, error) {
+	var transaction *blockchainparser.Transaction
+	err := cc.BlockDb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("transactions"))
+		transactionMetaBytes := b.Get(hash)
+		if transactionMetaBytes == nil {
+			return errors.New("Error: Transaction not found")
+		}
+		buf := bytes.NewBuffer(transactionMetaBytes)
+		transactionMeta := &TransactionMeta{}
+		struc.Unpack(buf, transactionMeta)
+		//fmt.Printf("key=%x, value=%v\n", blockchainparser.ReverseHex(hash), transactionMeta)
+
+		var err error
+		transaction, err = cc.readTransactionFromBlockFile(transactionMeta.FileNum, int64(transactionMeta.Pos))
+		if err != nil {
+			return err
+		}
+		//fmt.Printf("transaction:\n%v\n", transaction)
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return transaction, nil
+}
+
+func (cc *CarbonChain) readTransactionFromBlockFile(fileNum uint32, offset int64) (*blockchainparser.Transaction, error) {
+	// Open the block file for processing
+	blockFile, err := blockchainparser.NewBlockFile(cc.Options.DataDir, fileNum)
+	if err != nil {
+		return nil, err
+	}
+	defer blockFile.Close()
+
+	_, err = blockFile.Seek(offset, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	transaction, err := blockchainparser.ParseBlockTransactionFromFile(blockFile)
+	if transaction != nil {
+		transaction.StartPos = uint64(offset)
+	}
+
+	return transaction, err
+}
+
 func (cc *CarbonChain) readBlockFromBlockFile(fileNum uint32, offset int64) (*blockchainparser.Block, error) {
 	// Open the block file for processing
 	blockFile, err := blockchainparser.NewBlockFile(cc.Options.DataDir, fileNum)
