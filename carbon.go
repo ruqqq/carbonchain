@@ -14,6 +14,7 @@ import (
 	"log"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -535,7 +536,7 @@ func (cc *CarbonChain) GetBlockConfirmation(hash []byte) (int, error) {
 		}
 		maxHeight := binary.LittleEndian.Uint32(maxHeightByte)
 
-		confirmations = int(maxHeight - height)
+		confirmations = int(maxHeight-height) + 1
 
 		return nil
 	})
@@ -802,7 +803,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			}(nextHash)
 
 			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
-				log.Printf("%x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
+				log.Printf("Possible chain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
 			}
 		}
 
@@ -823,12 +824,24 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			err = cc.ChainDb.Update(func(tx *bolt.Tx) error {
 				bChain := tx.Bucket([]byte("chain"))
 				bFork := tx.Bucket([]byte("forks"))
+				bHeights := tx.Bucket([]byte("heights"))
 
+				// Relink the chain
 				err = bChain.Put(hashPrev, winningHash)
 				if err != nil {
 					return err
 				}
 
+				// Backtrack the maxHeight so we can recalculate heights for subsequent chains
+				hashPrevHeightByte := bHeights.Get(hashPrev)
+				if hashPrevHeightByte != nil {
+					err = bHeights.Put([]byte("maxHeight"), hashPrevHeightByte)
+					if err != nil {
+						return err
+					}
+				}
+
+				// Delete fork records
 				for _, h := range fork {
 					err = bFork.Delete(h)
 					if err != nil {
@@ -855,7 +868,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		bHeights := tx.Bucket([]byte("heights"))
 		height := uint32(0)
 
-		// find first in chain for this file
+		// Build height from last known maxHeight or Genesis block
 		var firstBlockHash []byte
 		maxHeightByte := bHeights.Get([]byte("maxHeight"))
 		if maxHeightByte != nil {
@@ -1008,6 +1021,10 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 			index := blockScanRequest.Index
 			blockStartPos := blockScanRequest.BlockStartPos
 			fileNum := blockScanRequest.FileNum
+
+			if blockStartPos == 0 {
+				continue
+			}
 
 			// check if block already scanned
 			blockFileScannedBlockPosBucketName := fmt.Sprintf("blockFile%dScannedBlockPos", fileNum)
@@ -1250,10 +1267,13 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 }
 
 func (cc *CarbonChain) processPacketQueue() error {
-	packetQueue := make(map[string][]Packet)
+	packetQueue := make([][]Packet, 0)
 
 	err := cc.CarbonDb.View(func(tx *bolt.Tx) error {
 		bPackets := tx.Bucket([]byte("packets"))
+
+		outputAddrToPacketsMap := make(map[string][]Packet)
+		packetQueueToOutputAddrMap := make(map[int][]byte)
 
 		c := bPackets.Cursor()
 		for id, outputAddr := c.First(); id != nil; id, outputAddr = c.Next() {
@@ -1284,12 +1304,20 @@ func (cc *CarbonChain) processPacketQueue() error {
 					continue
 				}
 
-				if packetQueue[hex.EncodeToString(outputAddr)] == nil {
-					packetQueue[hex.EncodeToString(outputAddr)] = make([]Packet, 0)
+				if outputAddrToPacketsMap[hex.EncodeToString(outputAddr)] == nil {
+					queue := make([]Packet, 0)
+					packetQueue = append(packetQueue, queue)
+					outputAddrToPacketsMap[hex.EncodeToString(outputAddr)] = queue
+					packetQueueToOutputAddrMap[len(packetQueue)-1] = outputAddr
 				}
 
-				packetQueue[hex.EncodeToString(outputAddr)] = append(packetQueue[hex.EncodeToString(outputAddr)], packet)
+				outputAddrToPacketsMap[hex.EncodeToString(outputAddr)] = append(outputAddrToPacketsMap[hex.EncodeToString(outputAddr)], packet)
+				//log.Printf("%s, %x\n", packet.Txid, outputAddr)
 			}
+		}
+
+		for i, outputAddr := range packetQueueToOutputAddrMap {
+			packetQueue[i] = outputAddrToPacketsMap[hex.EncodeToString(outputAddr)]
 		}
 
 		return nil
@@ -1300,17 +1328,11 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 	//log.Printf("%+v\n", packetQueue)
 
-	keys := []string{}
-	for key, _ := range packetQueue {
-		keys = append(keys, key)
-	}
-
 	datapacks := make([]Datapack, 0)
 
-	for m := 0; m < len(keys); m++ {
-		outputAddrStr := keys[m]
-		outputAddr, _ := hex.DecodeString(outputAddrStr)
-		packets := packetQueue[outputAddrStr]
+	for m := 0; m < len(packetQueue); m++ {
+		outputAddr := packetQueue[m][0].OutputAddr
+		packets := packetQueue[m]
 
 		usedPackets := make([]int, 0)
 		data := make([]byte, 0)
@@ -1333,7 +1355,7 @@ func (cc *CarbonChain) processPacketQueue() error {
 			}
 		}
 		if firstPacket == nil {
-			log.Printf("\tWARNING: Cannot find first packet outputAddr %x: %+v!\n", outputAddr, packets[0])
+			log.Printf("\tWARNING: Cannot find first packet outputAddr %s: %+v!\n", outputAddr, packets[0])
 			continue
 		}
 
@@ -1370,6 +1392,7 @@ func (cc *CarbonChain) processPacketQueue() error {
 					usedPackets = append(usedPackets, i)
 
 					found = true
+					break
 				}
 			}
 
@@ -1406,13 +1429,13 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 		// check if the last packet has the termination signal
 		if missingPackets {
-			log.Printf("\tWARNING: Missing packets for outputAddr %x. Last packet: %+v!\n", outputAddr, lastPacket)
+			log.Printf("\tWARNING: Missing packets for outputAddr %s. Last packet: %+v!\n", outputAddr, lastPacket)
 			continue
 		}
 
 		//log.Printf("Merged Packet Data: %s\n", data)
 		datapack := Datapack{FirstTxId: firstTxId, Data: data, Timestamp: lastTimestamp}
-		copy(datapack.OutputAddr[:], outputAddr)
+		copy(datapack.OutputAddr[:], outputAddr[:])
 		datapacks = append(datapacks, datapack)
 
 		// delete used packets
@@ -1428,12 +1451,37 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 		// delete if no more packets from this outputAddr
 		if len(packets) == 0 {
-			delete(packetQueue, outputAddrStr)
+			packetQueue = append(packetQueue[:m], packetQueue[m+1:]...)
+			m--
 		} else {
 			log.Printf("\tWARNING: More packets in outputAddr?: %+v\n", packets)
 			m--
 		}
 	}
+
+	// sort datapack based on their height in chain
+	cc.ChainDb.View(func(tx *bolt.Tx) error {
+		bChain := tx.Bucket([]byte("heights"))
+		sort.Slice(datapacks, func(i, j int) bool {
+			iBlockHash, err := cc.GetTransactionBlockHash(datapacks[i].FirstTxId)
+			if err != nil {
+				log.Fatal(err)
+			}
+			jBlockHash, err := cc.GetTransactionBlockHash(datapacks[j].FirstTxId)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			heightIByte := bChain.Get(iBlockHash)
+			heightI := binary.LittleEndian.Uint32(heightIByte)
+			heightJByte := bChain.Get(jBlockHash)
+			heightJ := binary.LittleEndian.Uint32(heightJByte)
+
+			return heightI < heightJ
+		})
+
+		return nil
+	})
 
 	// save datapacks to db
 	err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
@@ -1469,13 +1517,12 @@ func (cc *CarbonChain) processPacketQueue() error {
 			}
 		}
 	}
-	if len(packetQueue) > 0 {
-		log.Println("Unable to process:")
-		for outputAddr, packets := range packetQueue {
-			outputAddrByte, _ := hex.DecodeString(outputAddr)
-			log.Printf("\t%x: %+v", outputAddrByte, packets)
-		}
-	}
+	//if len(packetQueue) > 0 {
+	//	log.Println("Unable to process:")
+	//	for _, packets := range packetQueue {
+	//		log.Printf("\t%s: %+v", packets[0].OutputAddr, packets)
+	//	}
+	//}
 
 	// Save the unable to process packetQueues back to db
 	err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
@@ -1485,8 +1532,8 @@ func (cc *CarbonChain) processPacketQueue() error {
 			return err
 		}
 
-		for outputAddrStr, packets := range packetQueue {
-			outputAddr, _ := hex.DecodeString(outputAddrStr)
+		for _, packets := range packetQueue {
+			outputAddr := packets[0].OutputAddr[:]
 
 			p := bPackets.Bucket(outputAddr)
 			if p == nil {
