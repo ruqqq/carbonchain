@@ -34,6 +34,7 @@ func main() {
 			"Commands:\n"+
 			"  GetHeight\n"+
 			"  GetBlock <hash>\n"+
+			"  GetTx <hash>\n"+
 			"\n"+
 			"Options:\n")
 		flag.PrintDefaults()
@@ -80,6 +81,31 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Printf("Next Block: %x\n", blockchainparser.ReverseHex(nextHash))
+
+		return
+	} else if len(args) == 2 && args[0] == "GetTx" {
+		h, err := hex.DecodeString(args[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		hash := blockchainparser.ReverseHex(h)
+		transaction, err := cc.GetTransaction(hash)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Transaction:\n%+v\n", transaction)
+
+		blockHash, err := cc.GetTransactionBlockHash(hash)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Block Hash:\n%x\n", blockchainparser.ReverseHex(blockHash))
+
+		confirmations, err := cc.GetBlockConfirmation(blockHash)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Confirmations: %d\n", confirmations)
 
 		return
 	}
