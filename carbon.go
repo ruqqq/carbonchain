@@ -25,7 +25,6 @@ type CarbonChain struct {
 	CarbonDb        *bolt.DB
 	curBlockFileNum uint32
 	curBlockFilePos int64
-	ProcessFunc     func(carbonDb *bolt.DB)
 }
 
 type CarbonChainOptions struct {
@@ -34,6 +33,7 @@ type CarbonChainOptions struct {
 	PacketId     byte
 	GenesisBlock blockchainparser.Hash256
 	DataDir      string
+	ProcessFunc  func(cc *CarbonChain, carbonDb *bolt.DB)
 }
 
 type BlockMeta struct {
@@ -298,8 +298,8 @@ func (cc *CarbonChain) Init() error {
 		return err
 	}
 
-	if cc.ProcessFunc != nil {
-		go cc.ProcessFunc(cc.CarbonDb)
+	if cc.Options.ProcessFunc != nil {
+		go cc.Options.ProcessFunc(cc, cc.CarbonDb)
 	}
 
 	log.Println("----------END INIT----------")
@@ -352,8 +352,8 @@ func (cc *CarbonChain) Watch() error {
 							return
 						}
 
-						if cc.ProcessFunc != nil {
-							go cc.ProcessFunc(cc.CarbonDb)
+						if cc.Options.ProcessFunc != nil {
+							go cc.Options.ProcessFunc(cc, cc.CarbonDb)
 						}
 
 						// Sync DBs
@@ -1352,6 +1352,9 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 			return nil
 		})
+		if err != nil {
+			return err
+		}
 
 		// delete used packets
 		for i := 0; i < len(usedPackets); i++ {
