@@ -526,7 +526,7 @@ func (cc *CarbonChain) GetBlockConfirmation(hash []byte) (int, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	return confirmations, nil
