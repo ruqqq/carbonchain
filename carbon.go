@@ -493,6 +493,45 @@ func (cc *CarbonChain) GetBlockAtHeight(height int) (*blockchainparser.Block, er
 	return block, nil
 }
 
+func (cc *CarbonChain) GetBlockConfirmation(hash []byte) (int, error) {
+	confirmations := 0
+	err := cc.ChainDb.View(func(tx *bolt.Tx) error {
+		bHeights := tx.Bucket([]byte("heights"))
+		heightByte := bHeights.Get(hash)
+		if heightByte == nil {
+			return errors.New("Error: Block not found in chain")
+		}
+
+		// do a reverse fetch (key = height)
+		hash2 := bHeights.Get(heightByte)
+		if hash2 == nil {
+			return errors.New("Error: No block found at height")
+		}
+
+		// if block hash at height does not match the one we are querying, the block is orphaned
+		if !bytes.Equal(hash, hash2) {
+			return nil
+		}
+
+		height := binary.LittleEndian.Uint32(heightByte)
+
+		maxHeightByte := bHeights.Get([]byte("maxHeight"))
+		if maxHeightByte == nil {
+			return errors.New("Error: maxHeight not found")
+		}
+		maxHeight := binary.LittleEndian.Uint32(maxHeightByte)
+
+		confirmations = int(maxHeight - height)
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return confirmations, nil
+}
+
 func (cc *CarbonChain) GetTransaction(hash []byte) (*blockchainparser.Transaction, error) {
 	var transaction *blockchainparser.Transaction
 	err := cc.BlockDb.View(func(tx *bolt.Tx) error {
