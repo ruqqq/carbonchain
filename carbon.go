@@ -575,6 +575,29 @@ func (cc *CarbonChain) GetTransaction(hash []byte) (*blockchainparser.Transactio
 	return transaction, nil
 }
 
+func (cc *CarbonChain) GetTransactionBlockHash(hash []byte) ([]byte, error) {
+	var blockHash []byte
+	err := cc.BlockDb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("transactions"))
+		transactionMetaBytes := b.Get(hash)
+		if transactionMetaBytes == nil {
+			return errors.New("Error: Transaction not found")
+		}
+		buf := bytes.NewBuffer(transactionMetaBytes)
+		transactionMeta := &TransactionMeta{}
+		struc.Unpack(buf, transactionMeta)
+		//fmt.Printf("key=%x, value=%v\n", blockchainparser.ReverseHex(hash), transactionMeta)
+
+		blockHash = transactionMeta.BlockHash
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return blockHash, nil
+}
+
 func (cc *CarbonChain) readTransactionFromBlockFile(fileNum uint32, offset int64) (*blockchainparser.Transaction, error) {
 	// Open the block file for processing
 	blockFile, err := blockchainparser.NewBlockFile(cc.Options.DataDir, fileNum)
