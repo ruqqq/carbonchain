@@ -25,7 +25,7 @@ type CarbonChain struct {
 	CarbonDb        *bolt.DB
 	curBlockFileNum uint32
 	curBlockFilePos int64
-	ProcessFunc     func()
+	ProcessFunc     func(carbonDb *bolt.DB)
 }
 
 type CarbonChainOptions struct {
@@ -292,6 +292,16 @@ func (cc *CarbonChain) Init() error {
 			}
 		}
 	}
+
+	err = cc.processPacketQueue()
+	if err != nil {
+		return err
+	}
+
+	if cc.ProcessFunc != nil {
+		go cc.ProcessFunc(cc.CarbonDb)
+	}
+
 	log.Println("----------END INIT----------")
 
 	return err
@@ -319,18 +329,32 @@ func (cc *CarbonChain) Watch() error {
 						// Update lastBlockFileNum
 						if uint32(fileNum) > cc.curBlockFileNum {
 							// save curBlockFileNum to bucket
-							cc.BlockDb.Update(func(tx *bolt.Tx) error {
+							err = cc.BlockDb.Update(func(tx *bolt.Tx) error {
 								b := tx.Bucket([]byte("meta"))
 								data := make([]byte, 4)
 								binary.LittleEndian.PutUint32(data, cc.curBlockFileNum)
 								err := b.Put([]byte("lastBlockFileNum"), data)
 								return err
 							})
+							if err != nil {
+								log.Fatal(err)
+								return
+							}
 						}
 
 						log.Println("------PROCESSING BLOCKS------")
 						cc.processBlocksForFileNum(cc.curBlockFileNum, cc.curBlockFilePos)
 						log.Println("--------END PROCESSING-------")
+
+						err = cc.processPacketQueue()
+						if err != nil {
+							log.Fatal(err)
+							return
+						}
+
+						if cc.ProcessFunc != nil {
+							go cc.ProcessFunc(cc.CarbonDb)
+						}
 
 						// Sync DBs
 						cc.BlockDb.Sync()
@@ -766,15 +790,6 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	}
 
 	log.Printf("Chain + Height updated. Took: %d sec\n", time.Now().Unix()-startTime.Unix())
-
-	err = cc.processPacketQueue()
-	if err != nil {
-		return 0, err
-	}
-
-	if cc.ProcessFunc != nil {
-		go cc.ProcessFunc()
-	}
 
 	return lastBlockEndPos, nil
 }
