@@ -353,7 +353,11 @@ func (cc *CarbonChain) Watch() error {
 						}
 
 						log.Println("------PROCESSING BLOCKS------")
-						cc.processBlocksForFileNum(cc.curBlockFileNum, cc.curBlockFilePos)
+						cc.curBlockFilePos, err = cc.processBlocksForFileNum(cc.curBlockFileNum, cc.curBlockFilePos)
+						if err != nil {
+							log.Fatal(err)
+							return
+						}
 						log.Println("--------END PROCESSING-------")
 
 						err = cc.processPacketQueue()
@@ -816,7 +820,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			}
 
 			if cc.Options.LogLevel <= LOG_LEVEL_INFO {
-				fmt.Printf("Mainchain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(winningHash))
+				log.Printf("Mainchain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(winningHash))
 			}
 		}
 	}
@@ -1087,26 +1091,36 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 					packet.Txid = tx.Txid()
 					copy(packet.OutputAddr[:], outputAddr)
 					packet.Timestamp = time.Now().Unix()
-					log.Printf("Received packet in Txid: %v\n", packet.Txid)
-					log.Printf("\tData (%x, %d): %s\n", outputAddr, packet.Sequence, packet.Data)
-					//log.Printf("\tChecksum: %x vs %x\n", packet.Checksum[:], packet.CalculateChecksum())
-					//log.Printf("\tOutput Addr: %x (%d)\n", outputAddr, len(outputAddr))
-					//log.Printf("\tOutput Script: %x (%d)\n", script, len(script))
+
+					if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+						log.Printf("Received packet in Txid: %v\n", packet.Txid)
+					}
+					if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+						log.Printf("\tData (%x, %d): %s\n", outputAddr, packet.Sequence, packet.Data)
+						//log.Printf("\tChecksum: %x vs %x\n", packet.Checksum[:], packet.CalculateChecksum())
+						//log.Printf("\tOutput Addr: %x (%d)\n", outputAddr, len(outputAddr))
+						//log.Printf("\tOutput Script: %x (%d)\n", script, len(script))
+					}
 
 					err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
 						bPackets := tx.Bucket([]byte("packets"))
-						id, _ := bPackets.NextSequence()
-						bId := make([]byte, 8)
-						binary.BigEndian.PutUint64(bId, uint64(id))
-						err = bPackets.Put(bId, outputAddr)
-						if err != nil {
-							return err
-						}
-						log.Printf("\tCreated bucket: %x\n", outputAddr)
+						p := bPackets.Bucket(outputAddr)
+						if p == nil {
+							id, _ := bPackets.NextSequence()
+							bId := make([]byte, 8)
+							binary.BigEndian.PutUint64(bId, uint64(id))
+							err = bPackets.Put(bId, outputAddr)
+							if err != nil {
+								return err
+							}
+							if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+								log.Printf("\tCreated bucket: %x\n", outputAddr)
+							}
 
-						p, err := bPackets.CreateBucketIfNotExists(outputAddr)
-						if err != nil {
-							return err
+							p, err = bPackets.CreateBucket(outputAddr)
+							if err != nil {
+								return err
+							}
 						}
 
 						var outBuf bytes.Buffer
@@ -1114,8 +1128,8 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 						if err != nil {
 							return err
 						}
-						id, _ = p.NextSequence()
-						bId = make([]byte, 8)
+						id, _ := p.NextSequence()
+						bId := make([]byte, 8)
 						binary.BigEndian.PutUint64(bId, uint64(id))
 						err = p.Put(bId, outBuf.Bytes())
 						if err != nil {
@@ -1300,6 +1314,9 @@ func (cc *CarbonChain) processPacketQueue() error {
 			continue
 		}
 
+		// first packet txid will be the datapack txid
+		firstTxId := firstPacket.Txid
+
 		// we will use the last packet timestamp as the datapack timestamp; keep track of it
 		lastTimestamp := firstPacket.Timestamp
 
@@ -1371,31 +1388,9 @@ func (cc *CarbonChain) processPacketQueue() error {
 		}
 
 		//log.Printf("Merged Packet Data: %s\n", data)
-		datapack := Datapack{Txids: txids, Data: data, Timestamp: lastTimestamp}
+		datapack := Datapack{FirstTxId: firstTxId, Data: data, Timestamp: lastTimestamp}
 		copy(datapack.OutputAddr[:], outputAddr)
 		datapacks = append(datapacks, datapack)
-		err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
-			bDatas := tx.Bucket([]byte("datas"))
-
-			var buf bytes.Buffer
-			err := struc.Pack(&buf, datapack)
-			if err != nil {
-				return err
-			}
-
-			id, _ := bDatas.NextSequence()
-			b := make([]byte, 8)
-			binary.BigEndian.PutUint64(b, uint64(id))
-			err = bDatas.Put(b, buf.Bytes())
-			if err != nil {
-				return err
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
 
 		// delete used packets
 		for i := 0; i < len(usedPackets); i++ {
@@ -1412,20 +1407,50 @@ func (cc *CarbonChain) processPacketQueue() error {
 		if len(packets) == 0 {
 			delete(packetQueue, outputAddrStr)
 		} else {
+			log.Printf("\tWARNING: More packets in outputAddr?: %+v\n", packets)
 			m--
 		}
 	}
 
-	if len(datapacks) > 0 {
-		log.Println("Datapacks:")
+	// save datapacks to db
+	err = cc.CarbonDb.Batch(func(tx *bolt.Tx) error {
+		bDatas := tx.Bucket([]byte("datas"))
+
 		for _, datapack := range datapacks {
-			log.Printf("%s (%x - %+v)", datapack.Data, datapack.OutputAddr, datapack)
+			var buf bytes.Buffer
+			err := struc.Pack(&buf, &datapack)
+			if err != nil {
+				return err
+			}
+
+			id, _ := bDatas.NextSequence()
+			b := make([]byte, 8)
+			binary.BigEndian.PutUint64(b, uint64(id))
+			err = bDatas.Put(b, buf.Bytes())
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		if len(datapacks) > 0 {
+			log.Println("Datapacks:")
+			for _, datapack := range datapacks {
+				log.Printf("\t%s (%s - %+v)", datapack.Data, datapack.OutputAddr, datapack)
+			}
 		}
 	}
 	if len(packetQueue) > 0 {
 		log.Println("Unable to process:")
 		for outputAddr, packets := range packetQueue {
-			log.Printf("%x: %+v", outputAddr, packets)
+			outputAddrByte, _ := hex.DecodeString(outputAddr)
+			log.Printf("\t%x: %+v", outputAddrByte, packets)
 		}
 	}
 
@@ -1440,17 +1465,20 @@ func (cc *CarbonChain) processPacketQueue() error {
 		for outputAddrStr, packets := range packetQueue {
 			outputAddr, _ := hex.DecodeString(outputAddrStr)
 
-			id, _ := bPackets.NextSequence()
-			bId := make([]byte, 8)
-			binary.BigEndian.PutUint64(bId, uint64(id))
-			err = bPackets.Put(bId, outputAddr)
-			if err != nil {
-				return err
-			}
+			p := bPackets.Bucket(outputAddr)
+			if p == nil {
+				id, _ := bPackets.NextSequence()
+				bId := make([]byte, 8)
+				binary.BigEndian.PutUint64(bId, uint64(id))
+				err = bPackets.Put(bId, outputAddr)
+				if err != nil {
+					return err
+				}
 
-			p, err := bPackets.CreateBucketIfNotExists(outputAddr)
-			if err != nil {
-				return err
+				p, err = bPackets.CreateBucket(outputAddr)
+				if err != nil {
+					return err
+				}
 			}
 
 			for _, packet := range packets {
