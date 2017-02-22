@@ -18,6 +18,13 @@ import (
 	"time"
 )
 
+const (
+	LOG_LEVEL_VERBOSE = iota
+	LOG_LEVEL_INFO    = iota
+	LOG_LEVEL_DEBUG   = iota
+	LOG_LEVEL_ERROR   = iota
+)
+
 type CarbonChain struct {
 	Options         *CarbonChainOptions
 	BlockDb         *bolt.DB
@@ -34,6 +41,7 @@ type CarbonChainOptions struct {
 	GenesisBlock blockchainparser.Hash256
 	DataDir      string
 	ProcessFunc  func(cc *CarbonChain, carbonDb *bolt.DB)
+	LogLevel     int
 }
 
 type BlockMeta struct {
@@ -242,8 +250,10 @@ func (cc *CarbonChain) Init() error {
 			}
 		}
 	}
-	log.Printf("Last block file number in data dir: %d\n", lastBlockFileNum)
-	log.Printf("Last block file number scanned: %d\n", cc.curBlockFileNum)
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("Last block file number in data dir: %d\n", lastBlockFileNum)
+		log.Printf("Last block file number scanned: %d\n", cc.curBlockFileNum)
+	}
 
 	log.Println("------PROCESSING BLOCKS------")
 	for cc.curBlockFileNum <= uint32(lastBlockFileNum) {
@@ -613,7 +623,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 
 	// Get file length
 	length, _ := blockFile.Size()
-	log.Printf("Length: %d\n", length)
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("Length: %d\n", length)
+	}
 
 	// Skip if needed
 	if skip > 0 {
@@ -655,7 +667,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		blockPos = append(blockPos, blockStartPos)
 		lastBlockEndPos = blockEndPos
 	}
-	log.Printf("%d blocks found. Took: %d sec\n", len(blockPos), time.Now().Unix()-startTime.Unix())
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("%d blocks found. Took: %d sec\n", len(blockPos), time.Now().Unix()-startTime.Unix())
+	}
 
 	startTime = time.Now()
 
@@ -666,7 +680,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	numWorkers := runtime.GOMAXPROCS(-1) * 50 // e.g. 16 PROCS * 50 = 400 workers
 	doneChan := make(chan bool, numWorkers)
 
-	log.Println("Parsing...")
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Println("Parsing...")
+	}
 
 	go func() {
 		for index, blockStartPos := range blockPos {
@@ -681,12 +697,18 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	for completed := range blockPos {
 		result := <-blockScanResultChan
 
-		fmt.Printf("\rProgress: %.2f%% (index: %d)", float64(completed)*100.0/float64(len(blockPos)), result.Index)
+		if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+			fmt.Printf("\rProgress: %.2f%% (index: %d)", float64(completed)*100.0/float64(len(blockPos)), result.Index)
+		}
 	}
-	fmt.Println("")
-	log.Println("")
+	if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+		fmt.Println("")
+		log.Println("")
+	}
 
-	log.Printf("%d blocks scanned. Took: %d sec\n", len(blockPos), time.Now().Unix()-startTime.Unix())
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("%d blocks scanned. Took: %d sec\n", len(blockPos), time.Now().Unix()-startTime.Unix())
+	}
 	for w := 0; w < numWorkers; w++ {
 		doneChan <- true
 	}
@@ -697,6 +719,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 
 	forks := make(map[string][][]byte)
 
+	// TODO: Fork resolving should be done with block verification; block verification is NOT implemented yet
 	// Detect forks
 	cc.ChainDb.View(func(tx *bolt.Tx) error {
 		bFork := tx.Bucket([]byte("forks"))
@@ -713,8 +736,10 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			forks[hex.EncodeToString(hashPrev)] = append(forks[hex.EncodeToString(hashPrev)], hash)
 		}
 
-		log.Printf("Forks detected: %d\n", len(forks))
-		log.Println("Will attempt to fix...")
+		if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+			log.Printf("Forks detected: %d\n", len(forks))
+			log.Println("Will attempt to fix...")
+		}
 
 		return nil
 	})
@@ -749,7 +774,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 				}{nextHash, height - 1}
 			}(nextHash)
 
-			log.Printf("%x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
+			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+				log.Printf("%x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
+			}
 		}
 
 		winningHash := fork[0]
@@ -788,7 +815,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 				return 0, err
 			}
 
-			fmt.Printf("Mainchain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(winningHash))
+			if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+				fmt.Printf("Mainchain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(winningHash))
+			}
 		}
 	}
 
@@ -829,9 +858,13 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		}
 
 		oldHeight := height
-		log.Println("Calculating heights...")
-		log.Printf("Start from block: %x, Current height: %d\n", blockchainparser.ReverseHex(firstBlockHash), height)
-		fmt.Println("")
+		if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+			log.Println("Calculating heights...")
+			log.Printf("Start from block: %x, Current height: %d\n", blockchainparser.ReverseHex(firstBlockHash), height)
+		}
+		if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+			fmt.Println("")
+		}
 
 		hash := firstBlockHash
 		completed := 0
@@ -856,7 +889,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 
 			lastHash = hash
 			completed++
-			fmt.Printf("\rProgress: %.2f%% - %d: %x", float64(completed)*100.0/float64(len(blockPos)), height, blockchainparser.ReverseHex(hash))
+			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+				fmt.Printf("\rProgress: %.2f%% - %d: %x", float64(completed)*100.0/float64(len(blockPos)), height, blockchainparser.ReverseHex(hash))
+			}
 		}
 
 		maxHeightByte = make([]byte, 4)
@@ -866,10 +901,14 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			return err
 		}
 
-		fmt.Println("")
-		log.Println("")
+		if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+			fmt.Println("")
+			log.Println("")
+		}
 		if oldHeight != height {
-			log.Printf("New Height: %d - %x\n", height, blockchainparser.ReverseHex(lastHash))
+			if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+				log.Printf("New Height: %d - %x\n", height, blockchainparser.ReverseHex(lastHash))
+			}
 		}
 
 		return nil
@@ -878,7 +917,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		return 0, err
 	}
 
-	log.Printf("Chain + Height updated. Took: %d sec\n", time.Now().Unix()-startTime.Unix())
+	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("Chain + Height updated. Took: %d sec\n", time.Now().Unix()-startTime.Unix())
+	}
 
 	return lastBlockEndPos, nil
 }
