@@ -16,11 +16,11 @@ func (outputAddr OutputAddr) String() string {
 }
 
 type Datapack struct {
-	Txids      []blockchainparser.Hash256 `struc:"little"`
-	OutputAddr OutputAddr                 `struc:"little,[20]byte"`
-	Length     int                        `struc:"little,sizeof=Data"`
-	Data       []byte                     `struc:"little"`
-	Timestamp  int64                      `struc:"little"`
+	FirstTxId  blockchainparser.Hash256 `struc:"little,[32]byte"`
+	OutputAddr OutputAddr               `struc:"little,[20]byte"`
+	Length     int                      `struc:"little,sizeof=Data"`
+	Data       []byte                   `struc:"little"`
+	Timestamp  int64                    `struc:"little"`
 }
 
 type Packet struct {
