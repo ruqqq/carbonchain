@@ -388,6 +388,7 @@ func (cc *CarbonChain) Watch() error {
 		}
 	}()
 
+	log.Println("Carbonchain started.")
 	err = watcher.Add(cc.Options.DataDir + "/blocks")
 	if err != nil {
 		return err

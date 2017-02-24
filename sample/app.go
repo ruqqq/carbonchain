@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/boltdb/bolt"
@@ -86,6 +87,19 @@ func main() {
 		cc, err := carbonchain.NewCarbonChainWithDb(&carbonchain.CarbonChainOptions{LogLevel: carbonchain.LOG_LEVEL_DEBUG, Testnet: testnet, DataDir: datadir, PacketId: 0xfa, ProcessFunc: ProcessDatapack})
 		if err != nil {
 			log.Fatal(err)
+		}
+		defer cc.Close()
+
+		if _, err := os.Stat(cc.Options.DataDir); err != nil {
+			if os.IsNotExist(err) {
+				panic(errors.New("Bitcoin data directory not found or is invalid."))
+			}
+		}
+
+		if _, err := os.Stat(cc.Options.DataDir + "/blocks"); err != nil {
+			if os.IsNotExist(err) {
+				panic(errors.New("Bitcoin data directory not found or is invalid."))
+			}
 		}
 
 		err = cc.Init()
