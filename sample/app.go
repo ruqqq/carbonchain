@@ -145,6 +145,23 @@ func ProcessDatapack(cc *carbonchain.CarbonChain, carbonDb *bolt.DB) {
 
 	// Consume datapacks
 	if len(datapacks) > 0 {
+		// Open datas file for writing our datapacks data
+		var f *os.File
+		if _, err := os.Stat("datas.txt"); err != nil {
+			if os.IsNotExist(err) {
+				var err error
+				f, err = os.Create("datas.txt")
+				if err != nil {
+					log.Fatal(err)
+				}
+			} else {
+				f, err = os.OpenFile("datas.txt", os.O_APPEND, 666)
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+		}
+
 		fmt.Printf("Datapacks (%d):\n", len(datapacks))
 		for _, datapack := range datapacks {
 			blockHash, err := cc.GetTransactionBlockHash(datapack.FirstTxId)
@@ -155,8 +172,17 @@ func ProcessDatapack(cc *carbonchain.CarbonChain, carbonDb *bolt.DB) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			fmt.Printf("\t[%s (c: %d)] %s\n", datapack.OutputAddr, confirmations, datapack.Data)
+			out := fmt.Sprintf("[%s (c: %d)] %s\r\n", datapack.OutputAddr, confirmations, datapack.Data)
+			fmt.Print("\t" + out)
+
+			// Write data to file
+			_, err = f.WriteString(out)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
+
+		f.Close()
 
 		// Delete the datapacks after consume
 		err = carbonDb.Batch(func(tx *bolt.Tx) error {
