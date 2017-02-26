@@ -762,7 +762,17 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 				forks[hex.EncodeToString(hashPrev)] = make([][]byte, 0)
 			}
 
-			forks[hex.EncodeToString(hashPrev)] = append(forks[hex.EncodeToString(hashPrev)], hash)
+			found := false
+			for i := 0; i < len(forks[hex.EncodeToString(hashPrev)]); i++ {
+				if bytes.Equal(forks[hex.EncodeToString(hashPrev)][i], hash) {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				forks[hex.EncodeToString(hashPrev)] = append(forks[hex.EncodeToString(hashPrev)], hash)
+			}
 		}
 
 		if cc.Options.LogLevel <= LOG_LEVEL_INFO {
