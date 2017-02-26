@@ -787,45 +787,43 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	for prev, fork := range forks {
 		hashPrev, _ := hex.DecodeString(prev)
 
-		chainHeights := make(chan struct {
-			Hash   []byte
-			Height int
-		}, len(fork))
-		for _, nextHash := range fork {
-			go func(nextHash []byte) {
-				height := 0
-				hash := nextHash
-
-				cc.ChainDb.View(func(tx *bolt.Tx) error {
-					bChain := tx.Bucket([]byte("chain"))
-
-					for hash != nil {
-						hash = bChain.Get(hash)
-						height++
-					}
-
-					return nil
-				})
-
-				chainHeights <- struct {
-					Hash   []byte
-					Height int
-				}{nextHash, height - 1}
-			}(nextHash)
-
-			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
-				log.Printf("Possible chain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
-			}
-		}
-
 		winningHash := fork[0]
 		winningHeight := 0
 		resolved := false
-		for range fork {
-			chainHeight := <-chainHeights
-			if chainHeight.Height > winningHeight {
-				winningHeight = chainHeight.Height
-				winningHash = chainHeight.Hash
+
+		if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+			log.Printf("Fixing chain: %x, candidates: %d\n", blockchainparser.ReverseHex(hashPrev), len(fork))
+		}
+
+		for _, nextHash := range fork {
+			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+				log.Printf("\tTracing %x\n", blockchainparser.ReverseHex(nextHash))
+			}
+
+			height := 0
+			hash := nextHash
+
+			cc.ChainDb.View(func(tx *bolt.Tx) error {
+				bChain := tx.Bucket([]byte("chain"))
+
+				// Trace at max 20 height
+				for hash != nil && height <= 6 {
+					hash = bChain.Get(hash)
+					height++
+				}
+
+				return nil
+			})
+
+			if cc.Options.LogLevel <= LOG_LEVEL_VERBOSE {
+				log.Printf("\tPossible chain: %x -> %x\n", blockchainparser.ReverseHex(hashPrev), blockchainparser.ReverseHex(nextHash))
+			}
+
+			if height > winningHeight {
+				winningHeight = height
+				hash := make([]byte, len(nextHash))
+				copy(hash, nextHash)
+				winningHash = hash
 				resolved = true
 			}
 		}
@@ -834,7 +832,6 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		if resolved {
 			err = cc.ChainDb.Update(func(tx *bolt.Tx) error {
 				bChain := tx.Bucket([]byte("chain"))
-				bFork := tx.Bucket([]byte("forks"))
 				bHeights := tx.Bucket([]byte("heights"))
 
 				// Relink the chain
@@ -844,19 +841,14 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 				}
 
 				// Backtrack the maxHeight so we can recalculate heights for subsequent chains
+				maxHeightByte := bHeights.Get([]byte("maxHeight"))
 				hashPrevHeightByte := bHeights.Get(hashPrev)
-				if hashPrevHeightByte != nil {
-					err = bHeights.Put([]byte("maxHeight"), hashPrevHeightByte)
-					if err != nil {
-						return err
-					}
-				}
-
-				// Delete fork records
-				for _, h := range fork {
-					err = bFork.Delete(h)
-					if err != nil {
-						return err
+				if maxHeightByte != nil && hashPrevHeightByte != nil {
+					if binary.LittleEndian.Uint32(hashPrevHeightByte) < binary.LittleEndian.Uint32(maxHeightByte) {
+						err = bHeights.Put([]byte("maxHeight"), hashPrevHeightByte)
+						if err != nil {
+							return err
+						}
 					}
 				}
 
@@ -959,6 +951,31 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		if oldHeight != height {
 			if cc.Options.LogLevel <= LOG_LEVEL_INFO {
 				log.Printf("New Height: %d - %x\n", height, blockchainparser.ReverseHex(lastHash))
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	// Clean up old forks
+	err = cc.ChainDb.Update(func(tx *bolt.Tx) error {
+		bFork := tx.Bucket([]byte("forks"))
+		bHeights := tx.Bucket([]byte("heights"))
+
+		maxHeightByte := bHeights.Get([]byte("maxHeight"))
+
+		// Delete fork records if it is a confirmed block (current max height - block height > 6)
+		for prev := range forks {
+			hashPrev, _ := hex.DecodeString(prev)
+			hashHeightByte := bHeights.Get(hashPrev)
+			if binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
+				err = bFork.Delete(hashPrev)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
