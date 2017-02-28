@@ -2,12 +2,10 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/boltdb/bolt"
-	"github.com/lunixbochs/struc"
 	"github.com/ruqqq/blockchainparser/rpc"
 	"github.com/ruqqq/carbonchain"
 	"log"
@@ -126,12 +124,7 @@ func ProcessDatapack(cc *carbonchain.CarbonChain, carbonDb *bolt.DB) {
 
 		c := bDatas.Cursor()
 		for i, datapackByte := c.First(); i != nil; i, datapackByte = c.Next() {
-			buf := bytes.NewBuffer(datapackByte)
-			datapack := carbonchain.Datapack{}
-			err := struc.Unpack(buf, &datapack)
-			if err != nil {
-				return err
-			}
+			datapack := *carbonchain.NewDatapackFromBytes(datapackByte)
 
 			datapacks = append(datapacks, datapack)
 			datapackIds[len(datapacks)-1] = i
@@ -164,7 +157,7 @@ func ProcessDatapack(cc *carbonchain.CarbonChain, carbonDb *bolt.DB) {
 
 		fmt.Printf("Datapacks (%d):\n", len(datapacks))
 		for _, datapack := range datapacks {
-			blockHash, err := cc.GetTransactionBlockHash(datapack.FirstTxId)
+			blockHash, err := cc.GetTransactionBlockHash(datapack.TxIds[0])
 			if err != nil {
 				log.Fatal(err)
 			}

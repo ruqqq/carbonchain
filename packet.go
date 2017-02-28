@@ -15,25 +15,18 @@ func (outputAddr OutputAddr) String() string {
 	return hex.EncodeToString(outputAddr[:])
 }
 
-type Datapack struct {
-	FirstTxId  blockchainparser.Hash256 `struc:"little,[32]byte"`
-	OutputAddr OutputAddr               `struc:"little,[20]byte"`
-	Length     int                      `struc:"little,sizeof=Data"`
-	Data       []byte                   `struc:"little"`
-	Timestamp  int64                    `struc:"little"`
-}
-
 type Packet struct {
-	Id           byte                     `struc:"little"`
-	Txid         blockchainparser.Hash256 `struc:"little,[32]byte"`
-	Flag         int                      `struc:"little"`
-	Sequence     int16                    `struc:"little"`
-	Checksum     [8]byte                  `struc:"little"`
-	NextChecksum [8]byte                  `struc:"little"`
-	Length       int                      `struc:"little,sizeof=Data"`
-	Data         []byte                   `struc:"little"`
-	OutputAddr   OutputAddr               `struc:"little,[20]byte"`
-	Timestamp    int64                    `struc:"little"` // time this packet is inserted into db
+	Id           byte
+	Txid         blockchainparser.Hash256
+	Flag         int
+	Sequence     int16
+	Checksum     [8]byte
+	NextChecksum [8]byte
+	Data         []byte
+
+	// fields below only exists in db, not on blockchain
+	OutputAddr OutputAddr // outputAddr this packet belongs to
+	Timestamp  int64      // time this packet is inserted into db
 }
 
 func NewPacketFromBytes(data []byte) *Packet {
@@ -43,7 +36,18 @@ func NewPacketFromBytes(data []byte) *Packet {
 	packet.Sequence = int16(binary.LittleEndian.Uint16(data[2:4]))
 	copy(packet.Checksum[:], data[4:12])
 	copy(packet.NextChecksum[:], data[12:20])
-	packet.Data = data[20:]
+	packetData := data[20:]
+	packet.Data = make([]byte, len(packetData))
+	copy(packet.Data, packetData)
+	return packet
+}
+
+func NewPacketFromDbBytes(data []byte) *Packet {
+	packet := NewPacketFromBytes(data)
+	outputAddrByte := data[len(data)-28 : len(data)-8]
+	copy(packet.OutputAddr[:], outputAddrByte)
+	timestampByte := data[len(data)-8 : 8]
+	packet.Timestamp = int64(binary.LittleEndian.Uint64(timestampByte))
 	return packet
 }
 
@@ -79,6 +83,91 @@ func (packet *Packet) Bytes() []byte {
 	bin = append(bin, checksum...)       // checksum (8 byte)
 	bin = append(bin, nextChecksum...)   // nextChecksum (8 byte)
 	bin = append(bin, packet.Data...)    // data
+
+	return bin
+}
+
+func (packet *Packet) DbBytes() []byte {
+	bin := packet.Bytes()
+
+	outputAddr := make([]byte, 20)
+	copy(outputAddr, packet.OutputAddr[:])
+	bin = append(bin, outputAddr...)
+
+	timestamp := make([]byte, 8)
+	binary.LittleEndian.PutUint64(timestamp, uint64(packet.Timestamp))
+	bin = append(bin, timestamp...)
+
+	return bin
+}
+
+type Datapack struct {
+	TxIds      []blockchainparser.Hash256
+	OutputAddr OutputAddr
+	Data       []byte
+	Timestamp  int64
+}
+
+func NewDatapackFromBytes(data []byte) *Datapack {
+	datapack := &Datapack{}
+	txIdsLength := int(binary.LittleEndian.Uint32(data[0:4]))
+
+	pos := 4
+	for i := 0; i < txIdsLength; i++ {
+		var hash blockchainparser.Hash256
+		copy(hash[:], data[pos:pos+32])
+		pos += 32
+	}
+
+	copy(datapack.OutputAddr[:], data[pos:pos+20])
+	pos += 20
+
+	length := int(binary.LittleEndian.Uint32(data[pos : pos+4]))
+	pos += 4
+
+	datapack.Data = make([]byte, length)
+	copy(datapack.Data, data[pos:pos+length])
+	pos += length
+
+	timestampByte := data[pos : pos+8]
+	datapack.Timestamp = int64(binary.LittleEndian.Uint64(timestampByte))
+
+	return datapack
+}
+
+func (datapack *Datapack) Bytes() []byte {
+	// construct txIdsLength in bytes
+	txIdsLength := make([]byte, 4)
+	binary.LittleEndian.PutUint32(txIdsLength, uint32(len(datapack.TxIds)))
+
+	// prepare txIds
+	txIds := make([]byte, 32*len(datapack.TxIds))
+	for i := 0; i < len(datapack.TxIds); i++ {
+		copy(txIds[i*32:i*32+32], datapack.TxIds[i])
+	}
+
+	// convert outputAddr to slice
+	outputAddr := make([]byte, 20)
+	copy(outputAddr, datapack.OutputAddr[:])
+
+	// construct length in bytes
+	length := make([]byte, 4)
+	binary.LittleEndian.PutUint32(length, uint32(len(datapack.Data)))
+
+	data := make([]byte, len(datapack.Data))
+	copy(data, datapack.Data)
+
+	// construct timestamp in bytes
+	timestamp := make([]byte, 8)
+	binary.LittleEndian.PutUint64(timestamp, uint64(datapack.Timestamp))
+
+	bin := make([]byte, 0)
+	bin = append(bin, txIdsLength...)
+	bin = append(bin, txIds...)
+	bin = append(bin, outputAddr...)
+	bin = append(bin, length...)
+	bin = append(bin, data...)
+	bin = append(bin, timestamp...)
 
 	return bin
 }

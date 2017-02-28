@@ -166,7 +166,7 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 		return nil, err
 	}
 	err = cc.CarbonDb.Update(func(tx *bolt.Tx) error {
-		//tx.DeleteBucket([]byte("packets"))
+		tx.DeleteBucket([]byte("packets"))
 		_, err := tx.CreateBucketIfNotExists([]byte("packets"))
 		if err != nil {
 			log.Fatal(err)
@@ -178,7 +178,7 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 		return nil, err
 	}
 	err = cc.CarbonDb.Update(func(tx *bolt.Tx) error {
-		//tx.DeleteBucket([]byte("datas"))
+		tx.DeleteBucket([]byte("datas"))
 		_, err := tx.CreateBucketIfNotExists([]byte("datas"))
 		if err != nil {
 			log.Fatal(err)
@@ -1072,10 +1072,10 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 				return nil
 			})
 
-			if isScanned {
-				blockScanResultChan <- BlockScanResult{index}
-				continue
-			}
+			//if isScanned {
+			//	blockScanResultChan <- BlockScanResult{index}
+			//	continue
+			//}
 
 			// parse block data
 			block, err := cc.readBlockFromBlockFile(fileNum, blockStartPos-4)
@@ -1191,15 +1191,11 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 							}
 						}
 
-						var outBuf bytes.Buffer
-						err = struc.Pack(&outBuf, packet)
-						if err != nil {
-							return err
-						}
+						packetByte := packet.DbBytes()
 						id, _ := p.NextSequence()
 						bId := make([]byte, 8)
 						binary.BigEndian.PutUint64(bId, uint64(id))
-						err = p.Put(bId, outBuf.Bytes())
+						err = p.Put(bId, packetByte)
 						if err != nil {
 							return err
 						}
@@ -1314,12 +1310,7 @@ func (cc *CarbonChain) processPacketQueue() error {
 
 			c2 := b.Cursor()
 			for id2, packetByte := c2.First(); id2 != nil; id2, packetByte = c2.Next() {
-				buf := bytes.NewBuffer(packetByte)
-				packet := Packet{}
-				err := struc.Unpack(buf, &packet)
-				if err != nil {
-					return err
-				}
+				packet := *NewPacketFromDbBytes(packetByte)
 				//log.Printf("%d: %+v\n", binary.BigEndian.Uint64(id2), packet)
 
 				//if bytes.Equal([]byte{0, 0, 0, 0, 0, 0, 0, 0}, packet.Checksum[:]) {
@@ -1386,9 +1377,6 @@ func (cc *CarbonChain) processPacketQueue() error {
 			log.Printf("\tWARNING: Cannot find first packet outputAddr %s: %+v!\n", outputAddr, packets[0])
 			continue
 		}
-
-		// first packet txid will be the datapack txid
-		firstTxId := firstPacket.Txid
 
 		// we will use the last packet timestamp as the datapack timestamp; keep track of it
 		lastTimestamp := firstPacket.Timestamp
@@ -1462,7 +1450,7 @@ func (cc *CarbonChain) processPacketQueue() error {
 		}
 
 		//log.Printf("Merged Packet Data: %s\n", data)
-		datapack := Datapack{FirstTxId: firstTxId, Data: data, Timestamp: lastTimestamp}
+		datapack := Datapack{TxIds: txids, Data: data, Timestamp: lastTimestamp}
 		copy(datapack.OutputAddr[:], outputAddr[:])
 		datapacks = append(datapacks, datapack)
 
@@ -1491,11 +1479,11 @@ func (cc *CarbonChain) processPacketQueue() error {
 	cc.ChainDb.View(func(tx *bolt.Tx) error {
 		bChain := tx.Bucket([]byte("heights"))
 		sort.Slice(datapacks, func(i, j int) bool {
-			iBlockHash, err := cc.GetTransactionBlockHash(datapacks[i].FirstTxId)
+			iBlockHash, err := cc.GetTransactionBlockHash(datapacks[i].TxIds[0])
 			if err != nil {
 				log.Fatal(err)
 			}
-			jBlockHash, err := cc.GetTransactionBlockHash(datapacks[j].FirstTxId)
+			jBlockHash, err := cc.GetTransactionBlockHash(datapacks[j].TxIds[0])
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -1516,16 +1504,12 @@ func (cc *CarbonChain) processPacketQueue() error {
 		bDatas := tx.Bucket([]byte("datas"))
 
 		for _, datapack := range datapacks {
-			var buf bytes.Buffer
-			err := struc.Pack(&buf, &datapack)
-			if err != nil {
-				return err
-			}
+			datapackByte := datapack.Bytes()
 
 			id, _ := bDatas.NextSequence()
 			b := make([]byte, 8)
 			binary.BigEndian.PutUint64(b, uint64(id))
-			err = bDatas.Put(b, buf.Bytes())
+			err = bDatas.Put(b, datapackByte)
 			if err != nil {
 				return err
 			}
@@ -1580,16 +1564,12 @@ func (cc *CarbonChain) processPacketQueue() error {
 			}
 
 			for _, packet := range packets {
-				var buf bytes.Buffer
-				err := struc.Pack(&buf, &packet)
-				if err != nil {
-					return err
-				}
+				packetByte := packet.DbBytes()
 
 				id, _ := p.NextSequence()
 				bId := make([]byte, 8)
 				binary.BigEndian.PutUint64(bId, uint64(id))
-				err = p.Put(bId, buf.Bytes())
+				err = p.Put(bId, packetByte)
 				if err != nil {
 					return err
 				}
