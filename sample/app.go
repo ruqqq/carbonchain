@@ -171,6 +171,7 @@ func ProcessDatapack(cc *carbonchain.CarbonChain, carbonDb *bolt.DB) {
 			// Write data to file
 			_, err = f.WriteString(out)
 			if err != nil {
+				log.Println("Unable to write to datas.txt!")
 				log.Fatal(err)
 			}
 		}

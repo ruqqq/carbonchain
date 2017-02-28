@@ -315,7 +315,7 @@ func (cc *CarbonChain) Init() error {
 
 	log.Println("----------END INIT----------")
 
-	return err
+	return nil
 }
 
 func (cc *CarbonChain) Watch() error {
@@ -1311,7 +1311,9 @@ func (cc *CarbonChain) processPacketQueue() error {
 			c2 := b.Cursor()
 			for id2, packetByte := c2.First(); id2 != nil; id2, packetByte = c2.Next() {
 				packet := *NewPacketFromDbBytes(packetByte)
+				//log.Printf("%d: %x\n", binary.BigEndian.Uint64(id2), packetByte)
 				//log.Printf("%d: %+v\n", binary.BigEndian.Uint64(id2), packet)
+				//log.Printf("%d: %s\n", binary.BigEndian.Uint64(id2), packet.Txid)
 
 				//if bytes.Equal([]byte{0, 0, 0, 0, 0, 0, 0, 0}, packet.Checksum[:]) {
 				//	continue

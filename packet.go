@@ -17,7 +17,6 @@ func (outputAddr OutputAddr) String() string {
 
 type Packet struct {
 	Id           byte
-	Txid         blockchainparser.Hash256
 	Flag         int
 	Sequence     int16
 	Checksum     [8]byte
@@ -25,8 +24,9 @@ type Packet struct {
 	Data         []byte
 
 	// fields below only exists in db, not on blockchain
-	OutputAddr OutputAddr // outputAddr this packet belongs to
-	Timestamp  int64      // time this packet is inserted into db
+	Txid       blockchainparser.Hash256 // txId this packet was extracted from
+	OutputAddr OutputAddr               // outputAddr this packet belongs to
+	Timestamp  int64                    // time this packet is inserted into db
 }
 
 func NewPacketFromBytes(data []byte) *Packet {
@@ -44,9 +44,13 @@ func NewPacketFromBytes(data []byte) *Packet {
 
 func NewPacketFromDbBytes(data []byte) *Packet {
 	packet := NewPacketFromBytes(data)
-	outputAddrByte := data[len(data)-28 : len(data)-8]
+	packet.Data = packet.Data[:len(packet.Data)-60]
+	txIdByte := data[len(data)-60 : len(data)-60+32]
+	packet.Txid = make([]byte, 32)
+	copy(packet.Txid, txIdByte)
+	outputAddrByte := data[len(data)-28 : len(data)-28+20]
 	copy(packet.OutputAddr[:], outputAddrByte)
-	timestampByte := data[len(data)-8 : 8]
+	timestampByte := data[len(data)-8:]
 	packet.Timestamp = int64(binary.LittleEndian.Uint64(timestampByte))
 	return packet
 }
@@ -90,6 +94,10 @@ func (packet *Packet) Bytes() []byte {
 func (packet *Packet) DbBytes() []byte {
 	bin := packet.Bytes()
 
+	txId := make([]byte, 32)
+	copy(txId, packet.Txid[:])
+	bin = append(bin, txId...)
+
 	outputAddr := make([]byte, 20)
 	copy(outputAddr, packet.OutputAddr[:])
 	bin = append(bin, outputAddr...)
@@ -114,8 +122,9 @@ func NewDatapackFromBytes(data []byte) *Datapack {
 
 	pos := 4
 	for i := 0; i < txIdsLength; i++ {
-		var hash blockchainparser.Hash256
+		hash := make([]byte, 32)
 		copy(hash[:], data[pos:pos+32])
+		datapack.TxIds = append(datapack.TxIds, hash)
 		pos += 32
 	}
 
