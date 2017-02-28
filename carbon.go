@@ -166,7 +166,7 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 		return nil, err
 	}
 	err = cc.CarbonDb.Update(func(tx *bolt.Tx) error {
-		tx.DeleteBucket([]byte("packets"))
+		//tx.DeleteBucket([]byte("packets"))
 		_, err := tx.CreateBucketIfNotExists([]byte("packets"))
 		if err != nil {
 			log.Fatal(err)
@@ -178,7 +178,7 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 		return nil, err
 	}
 	err = cc.CarbonDb.Update(func(tx *bolt.Tx) error {
-		tx.DeleteBucket([]byte("datas"))
+		//tx.DeleteBucket([]byte("datas"))
 		_, err := tx.CreateBucketIfNotExists([]byte("datas"))
 		if err != nil {
 			log.Fatal(err)
@@ -1072,10 +1072,10 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 				return nil
 			})
 
-			//if isScanned {
-			//	blockScanResultChan <- BlockScanResult{index}
-			//	continue
-			//}
+			if isScanned {
+				blockScanResultChan <- BlockScanResult{index}
+				continue
+			}
 
 			// parse block data
 			block, err := cc.readBlockFromBlockFile(fileNum, blockStartPos-4)
