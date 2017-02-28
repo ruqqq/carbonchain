@@ -318,14 +318,13 @@ func (cc *CarbonChain) Init() error {
 	return nil
 }
 
-func (cc *CarbonChain) Watch() error {
+func (cc *CarbonChain) Watch(done chan bool) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer watcher.Close()
 
-	done := make(chan bool)
 	go func() {
 		for {
 			select {

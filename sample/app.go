@@ -105,7 +105,8 @@ func main() {
 			panic(err)
 		}
 
-		err = cc.Watch()
+		done := make(chan bool)
+		err = cc.Watch(done)
 		if err != nil {
 			panic(err)
 		}
