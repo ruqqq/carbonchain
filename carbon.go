@@ -12,6 +12,7 @@ import (
 	"github.com/ruqqq/blockchainparser"
 	"io/ioutil"
 	"log"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -97,6 +98,19 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 	}
 
 	cc.Options = options
+
+	// check directories
+	if _, err := os.Stat(cc.Options.DataDir); err != nil {
+		if os.IsNotExist(err) {
+			panic(errors.New("Bitcoin data directory not found or is invalid."))
+		}
+	}
+
+	if _, err := os.Stat(cc.Options.DataDir + "/blocks"); err != nil {
+		if os.IsNotExist(err) {
+			panic(errors.New("Bitcoin data directory not found or is invalid."))
+		}
+	}
 
 	// create buckets if needed
 	err := cc.BlockDb.Update(func(tx *bolt.Tx) error {

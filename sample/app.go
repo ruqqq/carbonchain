@@ -88,18 +88,6 @@ func main() {
 		}
 		defer cc.Close()
 
-		if _, err := os.Stat(cc.Options.DataDir); err != nil {
-			if os.IsNotExist(err) {
-				panic(errors.New("Bitcoin data directory not found or is invalid."))
-			}
-		}
-
-		if _, err := os.Stat(cc.Options.DataDir + "/blocks"); err != nil {
-			if os.IsNotExist(err) {
-				panic(errors.New("Bitcoin data directory not found or is invalid."))
-			}
-		}
-
 		err = cc.Init()
 		if err != nil {
 			panic(err)
