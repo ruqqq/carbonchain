@@ -325,7 +325,7 @@ func (cc *CarbonChain) Init() error {
 	}
 
 	if cc.Options.ProcessFunc != nil {
-		go cc.Options.ProcessFunc(cc, cc.CarbonDb)
+		cc.Options.ProcessFunc(cc, cc.CarbonDb)
 	}
 
 	log.Println("----------END INIT----------")
@@ -382,7 +382,7 @@ func (cc *CarbonChain) Watch(done chan bool) error {
 						}
 
 						if cc.Options.ProcessFunc != nil {
-							go cc.Options.ProcessFunc(cc, cc.CarbonDb)
+							cc.Options.ProcessFunc(cc, cc.CarbonDb)
 						}
 
 						// Sync DBs
