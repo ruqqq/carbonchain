@@ -1002,12 +1002,16 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		bHeights := tx.Bucket([]byte("heights"))
 
 		maxHeightByte := bHeights.Get([]byte("maxHeight"))
+		if maxHeightByte == nil {
+			// Nothing to clean up if maxHeightByte is nil
+			return nil
+		}
 
-		// Delete fork records if it is a confirmed block (current max height - block height > 6)
+		// Delete fork records if it is a confirmed block or if the block no longer has hashPrev (current max height - block height > 6)
 		for prev := range forks {
 			hashPrev, _ := hex.DecodeString(prev)
 			hashHeightByte := bHeights.Get(hashPrev)
-			if binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
+			if hashHeightByte == nil || binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
 				err = bFork.Delete(hashPrev)
 				if err != nil {
 					return err
