@@ -17,7 +17,7 @@ func (outputAddr OutputAddr) String() string {
 
 type Packet struct {
 	Id           byte
-	Flag         int
+	Version      int8
 	Sequence     int16
 	Checksum     [8]byte
 	NextChecksum [8]byte
@@ -32,7 +32,7 @@ type Packet struct {
 func NewPacketFromBytes(data []byte) *Packet {
 	packet := &Packet{}
 	packet.Id = data[0]
-	packet.Flag = int(data[1])
+	packet.Version = int8(data[1])
 	packet.Sequence = int16(binary.LittleEndian.Uint16(data[2:4]))
 	copy(packet.Checksum[:], data[4:12])
 	copy(packet.NextChecksum[:], data[12:20])
@@ -81,12 +81,12 @@ func (packet *Packet) Bytes() []byte {
 	copy(nextChecksum, packet.NextChecksum[:])
 
 	bin := make([]byte, 0)
-	bin = append(bin, packet.Id)         // identifier (1 byte)
-	bin = append(bin, byte(packet.Flag)) // flag (1 byte)
-	bin = append(bin, seq...)            // sequence (2 byte)
-	bin = append(bin, checksum...)       // checksum (8 byte)
-	bin = append(bin, nextChecksum...)   // nextChecksum (8 byte)
-	bin = append(bin, packet.Data...)    // data
+	bin = append(bin, packet.Id)            // identifier (1 byte)
+	bin = append(bin, byte(packet.Version)) // flag (1 byte)
+	bin = append(bin, seq...)               // sequence (2 byte)
+	bin = append(bin, checksum...)          // checksum (8 byte)
+	bin = append(bin, nextChecksum...)      // nextChecksum (8 byte)
+	bin = append(bin, packet.Data...)       // data
 
 	return bin
 }
@@ -111,6 +111,7 @@ func (packet *Packet) DbBytes() []byte {
 
 type Datapack struct {
 	TxIds      []blockchainparser.Hash256
+	Version    int8
 	OutputAddr OutputAddr
 	Data       []byte
 	Timestamp  int64
@@ -127,6 +128,9 @@ func NewDatapackFromBytes(data []byte) *Datapack {
 		datapack.TxIds = append(datapack.TxIds, hash)
 		pos += 32
 	}
+
+	datapack.Version = int8(data[pos])
+	pos += 1
 
 	copy(datapack.OutputAddr[:], data[pos:pos+20])
 	pos += 20
@@ -173,6 +177,7 @@ func (datapack *Datapack) Bytes() []byte {
 	bin := make([]byte, 0)
 	bin = append(bin, txIdsLength...)
 	bin = append(bin, txIds...)
+	bin = append(bin, byte(datapack.Version))
 	bin = append(bin, outputAddr...)
 	bin = append(bin, length...)
 	bin = append(bin, data...)
