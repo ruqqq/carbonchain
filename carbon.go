@@ -997,6 +997,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	}
 
 	// Clean up old forks
+	deletedForks := 0
 	err = cc.ChainDb.Update(func(tx *bolt.Tx) error {
 		bFork := tx.Bucket([]byte("forks"))
 		bHeights := tx.Bucket([]byte("heights"))
@@ -1012,6 +1013,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 				if err != nil {
 					return err
 				}
+				deletedForks++
 			}
 		}
 
@@ -1019,6 +1021,9 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	})
 	if err != nil {
 		return 0, err
+	}
+	if deletedForks > 0 && cc.Options.LogLevel <= LOG_LEVEL_INFO {
+		log.Printf("Deleted Old Forks: %d\n", deletedForks)
 	}
 
 	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
