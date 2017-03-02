@@ -56,6 +56,7 @@ type TransactionMeta struct {
 	FileNum   uint32                   `struc:"little"`
 	BlockHash blockchainparser.Hash256 `struc:"little,[32]byte"`
 	Pos       uint64                   `struc:"little"`
+	Index     uint32                   `struc:"little"`
 }
 
 type BlockScanRequest struct {
@@ -613,6 +614,28 @@ func (cc *CarbonChain) GetTransactionBlockHash(hash []byte) ([]byte, error) {
 	return blockHash, nil
 }
 
+func (cc *CarbonChain) GetTransactionMeta(hash []byte) (*TransactionMeta, error) {
+	var transactionMeta *TransactionMeta
+	err := cc.BlockDb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("transactions"))
+		transactionMetaBytes := b.Get(hash)
+		if transactionMetaBytes == nil {
+			return errors.New("Error: Transaction not found")
+		}
+		buf := bytes.NewBuffer(transactionMetaBytes)
+		transactionMeta = &TransactionMeta{}
+		struc.Unpack(buf, transactionMeta)
+		//fmt.Printf("key=%x, value=%v\n", blockchainparser.ReverseHex(hash), transactionMeta)
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return transactionMeta, nil
+}
+
 func (cc *CarbonChain) readTransactionFromBlockFile(fileNum uint32, offset int64) (*blockchainparser.Transaction, error) {
 	// Open the block file for processing
 	blockFile, err := blockchainparser.NewBlockFile(cc.Options.DataDir, fileNum)
@@ -1100,10 +1123,10 @@ func (cc *CarbonChain) blockScanWorker(blockScanRequestChan chan BlockScanReques
 			blockHash := block.Hash()
 
 			// save txs pos in db
-			for _, tx := range block.Transactions {
+			for i, tx := range block.Transactions {
 				// save transaction pos in db
 				var buf bytes.Buffer
-				transactionMeta := &TransactionMeta{FileNum: fileNum, BlockHash: blockHash, Pos: tx.StartPos}
+				transactionMeta := &TransactionMeta{FileNum: fileNum, BlockHash: blockHash, Pos: tx.StartPos, Index: uint32(i)}
 				err := struc.Pack(&buf, transactionMeta)
 				if err != nil {
 					log.Fatalln(err)
@@ -1490,28 +1513,36 @@ func (cc *CarbonChain) processPacketQueue() error {
 		}
 	}
 
-	// sort datapack based on their height in chain
-	cc.ChainDb.View(func(tx *bolt.Tx) error {
-		bChain := tx.Bucket([]byte("heights"))
-		sort.Slice(datapacks, func(i, j int) bool {
-			iBlockHash, err := cc.GetTransactionBlockHash(datapacks[i].TxIds[0])
-			if err != nil {
-				log.Fatal(err)
-			}
-			jBlockHash, err := cc.GetTransactionBlockHash(datapacks[j].TxIds[0])
-			if err != nil {
-				log.Fatal(err)
-			}
+	// sort datapack based on their height in chain and transaction index in block
+	sort.Slice(datapacks, func(i, j int) bool {
+		iTransaction, err := cc.GetTransactionMeta(datapacks[i].TxIds[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+		iBlockHash := iTransaction.BlockHash
+		jTransaction, err := cc.GetTransactionMeta(datapacks[j].TxIds[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+		jBlockHash := jTransaction.BlockHash
 
-			heightIByte := bChain.Get(iBlockHash)
-			heightI := binary.LittleEndian.Uint32(heightIByte)
-			heightJByte := bChain.Get(jBlockHash)
-			heightJ := binary.LittleEndian.Uint32(heightJByte)
+		if bytes.Equal(iBlockHash, jBlockHash) {
+			return iTransaction.Index < jTransaction.Index
+		} else {
+			var heightI uint32
+			var heightJ uint32
+			cc.ChainDb.View(func(tx *bolt.Tx) error {
+				bChain := tx.Bucket([]byte("heights"))
+				heightIByte := bChain.Get(iBlockHash)
+				heightI = binary.LittleEndian.Uint32(heightIByte)
+				heightJByte := bChain.Get(jBlockHash)
+				heightJ = binary.LittleEndian.Uint32(heightJByte)
+
+				return nil
+			})
 
 			return heightI < heightJ
-		})
-
-		return nil
+		}
 	})
 
 	// save datapacks to db
