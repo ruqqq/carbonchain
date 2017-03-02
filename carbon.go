@@ -1007,7 +1007,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			isDeleted := false
 			for _, nextHash := range fork {
 				hashHeightByte := bHeights.Get(nextHash)
-				if binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
+				if hashHeightByte == nil || binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
 					err = bFork.Delete(nextHash)
 					if err != nil {
 						return err
