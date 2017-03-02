@@ -823,7 +823,8 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 	for prev, fork := range forks {
 		hashPrev, _ := hex.DecodeString(prev)
 
-		winningHash := fork[0]
+		winningHash := make([]byte, len(fork[0]))
+		copy(winningHash, fork[0])
 		winningHeight := 0
 		resolved := false
 
@@ -842,7 +843,7 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 			cc.ChainDb.View(func(tx *bolt.Tx) error {
 				bChain := tx.Bucket([]byte("chain"))
 
-				// Trace at max 20 height
+				// Trace at max 6 height
 				for hash != nil && height <= 6 {
 					hash = bChain.Get(hash)
 					height++
@@ -857,14 +858,11 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 
 			if height > winningHeight {
 				winningHeight = height
-				hash := make([]byte, len(nextHash))
-				copy(hash, nextHash)
-				winningHash = hash
+				copy(winningHash, nextHash)
 				resolved = true
 			}
 		}
 
-		//chain[hex.EncodeToString(hashPrev)] = winningHash
 		if resolved {
 			err = cc.ChainDb.Update(func(tx *bolt.Tx) error {
 				bChain := tx.Bucket([]byte("chain"))
@@ -1005,14 +1003,19 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 		maxHeightByte := bHeights.Get([]byte("maxHeight"))
 
 		// Delete fork records if it is a confirmed block (current max height - block height > 6)
-		for prev := range forks {
-			hashPrev, _ := hex.DecodeString(prev)
-			hashHeightByte := bHeights.Get(hashPrev)
-			if binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
-				err = bFork.Delete(hashPrev)
-				if err != nil {
-					return err
+		for _, fork := range forks {
+			isDeleted := false
+			for _, nextHash := range fork {
+				hashHeightByte := bHeights.Get(nextHash)
+				if binary.LittleEndian.Uint32(maxHeightByte)-binary.LittleEndian.Uint32(hashHeightByte) > 6 {
+					err = bFork.Delete(nextHash)
+					if err != nil {
+						return err
+					}
+					isDeleted = true
 				}
+			}
+			if isDeleted {
 				deletedForks++
 			}
 		}
