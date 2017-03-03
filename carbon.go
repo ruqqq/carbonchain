@@ -84,7 +84,11 @@ func NewCarbonChain(blockDb *bolt.DB, chainDb *bolt.DB, carbonDb *bolt.DB, optio
 	}
 
 	if options.GenesisBlock == nil {
-		genesisHex, _ := hex.DecodeString("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
+		genesisBlockHash := "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+		if options.Testnet {
+			genesisBlockHash = "000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"
+		}
+		genesisHex, _ := hex.DecodeString(genesisBlockHash)
 		genesisHex = blockchainparser.ReverseHex(genesisHex)
 		options.GenesisBlock = genesisHex
 	}
