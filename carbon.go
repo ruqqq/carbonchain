@@ -1505,13 +1505,19 @@ func (cc *CarbonChain) processPacketQueue() error {
 		datapacks = append(datapacks, datapack)
 
 		// delete used packets
-		for i := 0; i < len(usedPackets); i++ {
-			packets[i].Id = 0
-		}
-		for i := 0; i < len(packets); i++ {
-			if packets[i].Id == 0 {
-				packets = append(packets[:i], packets[i+1:]...)
-				i--
+		oldPackets := packets
+		packets = make([]Packet, 0)
+		for i := 0; i < len(oldPackets); i++ {
+			used := false
+			for j := 0; j < len(usedPackets); j++ {
+				if i == usedPackets[j] {
+					used = true
+					break
+				}
+			}
+
+			if !used {
+				packets = append(packets, oldPackets[i])
 			}
 		}
 
