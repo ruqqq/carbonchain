@@ -15,12 +15,18 @@ func (outputAddr OutputAddr) String() string {
 	return hex.EncodeToString(outputAddr[:])
 }
 
+type PacketChecksum [8]byte
+
+func (packetChecksum PacketChecksum) String() string {
+	return hex.EncodeToString(packetChecksum[:])
+}
+
 type Packet struct {
 	Id           byte
 	Version      int8
 	Sequence     int16
-	Checksum     [8]byte
-	NextChecksum [8]byte
+	Checksum     PacketChecksum
+	NextChecksum PacketChecksum
 	Data         []byte
 
 	// fields below only exists in db, not on blockchain
