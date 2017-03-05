@@ -742,11 +742,12 @@ func (cc *CarbonChain) processBlocksForFileNum(fileNum uint32, skip int64) (int6
 
 	startTime = time.Now()
 
-	// Scan every block in the file that we have found
-	blockScanRequestChan := make(chan BlockScanRequest, len(blockPos))
-	blockScanResultChan := make(chan BlockScanResult, len(blockPos))
-
+	// Create workers to scan the block in parallel
 	numWorkers := runtime.GOMAXPROCS(-1) * 50 // e.g. 16 PROCS * 50 = 400 workers
+
+	blockScanRequestChan := make(chan BlockScanRequest, numWorkers)
+	blockScanResultChan := make(chan BlockScanResult, numWorkers)
+
 	doneChan := make(chan bool, numWorkers)
 
 	if cc.Options.LogLevel <= LOG_LEVEL_INFO {
